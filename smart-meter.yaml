@@ -1,0 +1,119 @@
+esphome:
+  name: smart-meter-reader
+  friendly_name: Smart Meter Reader
+
+esp32:
+  board: esp32-c3-devkitm-1
+  framework:
+    type: esp-idf
+
+# Enable logging (useful for debugging in Home Assistant)
+logger:
+  # Temporarily set to DEBUG so you can see the meter data coming in
+  level: INFO 
+
+# Enable Home Assistant API
+api:
+
+# Enable Over-The-Air updates
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: "wifi_ssid"
+  password: "wifi_password"
+  fast_connect: true
+  output_power: 18.0
+
+  # Enable fallback hotspot (captive portal) in case wifi router is down
+  ap:
+    ssid: "Meter-Reader-Fallback"
+    password: "fallbackpassword"
+
+captive_portal:
+
+# --- SMART METER CONFIGURATION ---
+
+# 1. Import the custom IEC 62056-21 component
+external_components:
+  - source: github://aquaticus/esphome-iec62056
+
+# 2. Setup the Hardware UART bus (Match to your ESP32-C3 wiring)
+uart:
+  id: meter_uart
+  rx_pin: GPIO21  # Connected to Probe TX
+  tx_pin: GPIO20  # Connected to Probe RX
+  baud_rate: 300
+  data_bits: 7
+  parity: EVEN
+  stop_bits: 1
+
+# 3. Configure the protocol handler
+iec62056:
+  id: smart_meter
+  uart_id: meter_uart
+  update_interval: 5m   # Pull data every 60s
+  baud_rate_max: 2400     # Allow ESP32 to shift to 9600 baud for fast reading
+
+# 4. Map the OBIS codes directly to Home Assistant Sensors
+sensor:
+  # Total Energy
+  - platform: iec62056
+    obis: "15.8.0"
+    name: "Meter Total Energy"
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    icon: "mdi:flash"
+
+  # Tariff 1 Energy
+  - platform: iec62056
+    obis: "15.8.1"
+    name: "Meter Tariff 1"
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    icon: "mdi:flash"
+
+  # Tariff 2 Energy
+  - platform: iec62056
+    obis: "15.8.2"
+    name: "Meter Tariff 2"
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    icon: "mdi:flash-outline"
+
+  # Grid Voltage (Phase 1)
+  - platform: iec62056
+    obis: "32.7"
+    id: meter_voltage   # Added ID for calculation
+    name: "Grid Voltage"
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    icon: "mdi:lightning-bolt"
+
+  # Grid Current (Phase 1)
+  - platform: iec62056
+    obis: "31.7"
+    id: meter_current   # Added ID for calculation
+    name: "Grid Current"
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+    icon: "mdi:current-ac"
+
+  # Calculated Real-time Consumption (A * V)
+  - platform: template
+    name: "Realtime Power"          # Changed name to force a clean HA entity
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    icon: "mdi:gauge"
+    lambda: |-
+      if (id(meter_voltage).has_state() && id(meter_current).has_state()) {
+        return id(meter_voltage).state * id(meter_current).state;
+      } else {
+        return NAN;
+      }
